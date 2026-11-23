@@ -1,0 +1,9 @@
+.env
+.env.*
+.vercel/
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3*
+nomina*.json
+Nomina*.json

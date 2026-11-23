@@ -5,7 +5,12 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 from xml.sax.saxutils import escape
 
-ROOT=Path(__file__).resolve().parent/'privado'
+PROJECT=Path(__file__).resolve().parent
+ROOT=PROJECT/'privado' if (PROJECT/'privado'/'banco.json').is_file() else PROJECT
+
+def bundled_path(group,name):
+    path=ROOT/group/name
+    return path if path.is_file() else ROOT/name
 BOOT=Lock()
 initialized=False
 DATA=json.loads((ROOT/'banco.json').read_text('utf8'))
@@ -200,7 +205,7 @@ class Handler:
             e=evaluation(db,c)
             if not db.execute('SELECT 1 FROM attempt WHERE code=? AND student=?',(c,student)).fetchone() or not any(q.get('visual')=='/recurso/'+ident for q in e['items']):
                 raise PermissionError('Recurso privado.')
-        f=ROOT/'recursos'/f'{ident}.png'
+        f=bundled_path('recursos',f'{ident}.png')
         if f.is_file(): raise FileResponse(f.read_bytes(),'image/png')
         asset=db.execute('SELECT mime,content FROM asset WHERE id=?',(ident,)).fetchone()
         if not asset: raise ValueError('Recurso inexistente.')
@@ -258,7 +263,7 @@ class Handler:
             if not re.fullmatch(r'(?:[0-4]|[A-F0-9]{10})',i): raise ValueError('Fuente inválida.')
             file=DATA['sources'][int(i)]['name'] if len(i)==1 else f'{i}.pdf'
             if len(i)==1:
-                raise FileResponse(None,'application/pdf',file=ROOT/'fuentes'/file)
+                raise FileResponse(None,'application/pdf',file=bundled_path('fuentes',file))
             asset=db.execute('SELECT content FROM asset WHERE id=?',(i,)).fetchone()
             if not asset: raise ValueError('Fuente sin cargar.')
             raise FileResponse(base64.b64decode(asset['content']),'application/pdf')

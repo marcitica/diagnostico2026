@@ -7,6 +7,7 @@
 .exam-cover{text-align:center;padding:clamp(1.6rem,5vw,3.4rem) clamp(1rem,4vw,2.6rem);border-top:4px solid var(--teal)}
 .exam-cover .label{margin:0 0 .65rem}.exam-cover h1{max-width:22ch;margin:.2em auto .8em;text-wrap:balance}
 .exam-details{display:flex;flex-wrap:wrap;justify-content:center;gap:.6rem;list-style:none;margin:0;padding:0}
+.exam-credit{margin:1.55rem 0 0;color:#234752}.exam-credit strong{display:block;margin-top:.25rem;font-size:1.05rem}
 .exam-details li{border:1px solid var(--line);border-radius:999px;padding:.45rem .85rem;background:#f1f6f6;color:#234752;font-weight:650}
 </style>
 <header><strong>CTP Cañas · Desarrollo Web</strong><button hidden id="out">Cerrar sesión</button></header>
@@ -31,7 +32,7 @@ function binder(actions,scope=view){scope.querySelectorAll('[data-action]').forE
 function examCover(title,count,duration){
  const hours=Math.floor(duration/60), minutes=duration%60;
  const time=duration===null?'':duration>0?[hours?hours+(hours===1?' hora':' horas'):'',minutes?minutes+(minutes===1?' minuto':' minutos'):''].filter(Boolean).join(' '):'Sin límite de tiempo';
- return `<section class="card exam-cover" aria-labelledby="exam-title"><p class="label">CTP Cañas · Especialidad técnica</p><h1 id="exam-title">${h(title)}</h1><ul class="exam-details" aria-label="Detalles de la evaluación"><li>${h(count)} preguntas</li>${time?`<li>${h(time)}</li>`:''}<li>Selección única</li></ul></section>`
+ return `<section class="card exam-cover" aria-labelledby="exam-title"><p class="label">CTP Cañas · Especialidad técnica</p><h1 id="exam-title">${h(title)}</h1><ul class="exam-details" aria-label="Detalles de la evaluación"><li>${h(count)} preguntas</li>${time?`<li>${h(time)}</li>`:''}<li>Selección única</li></ul><p class="exam-credit">Desarrollado por <strong>MSc. Eulleny Hernández</strong></p></section>`
 }
 function login(){
  view.innerHTML=`${examCover('Evaluación diagnóstica de Desarrollo Web',60,180)}<div class="grid"><form id="student" class="card"><h2>Ingreso de estudiantes</h2>${field('Identificación escolar','id')}${field('Clave individual','pin','','password')}<button class="primary">Continuar</button></form><form id="teacher" class="card"><h2>Ingreso docente</h2>${field('Clave docente','password','','password')}<button class="primary">Ingresar</button></form></div>`;

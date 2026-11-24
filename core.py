@@ -75,6 +75,7 @@ def setup():
                 'CREATE TABLE IF NOT EXISTS evaluation (code TEXT PRIMARY KEY, data TEXT NOT NULL, created BIGINT NOT NULL)',
                 "CREATE TABLE IF NOT EXISTS attempt (code TEXT, student TEXT, answers TEXT NOT NULL DEFAULT '{}', marks TEXT NOT NULL DEFAULT '[]', started BIGINT, delivered BIGINT, receipt TEXT, PRIMARY KEY(code,student))",
                 'CREATE TABLE IF NOT EXISTS session (token TEXT PRIMARY KEY, role TEXT, subject TEXT, evaluation TEXT, expires BIGINT)',
+                'CREATE TABLE IF NOT EXISTS attempt_option_order (code TEXT, student TEXT, ordering TEXT NOT NULL, PRIMARY KEY(code,student))',
                 'CREATE TABLE IF NOT EXISTS asset (id TEXT PRIMARY KEY, mime TEXT NOT NULL, content TEXT NOT NULL)',
             ]
             for statement in schema: db.execute(statement)
@@ -93,8 +94,36 @@ def setup():
                 print('Clave local inicial:',password,flush=True)
         initialized=True
 def rows(db,sql,args=()): return [dict(x) for x in db.execute(sql,args)]
+POSITION_NOTICE = 'Revisión docente: la redacción depende de las letras o de la posición. Se conserva el orden original.'
+POSITION_REFERENCE = re.compile(
+    r'\b(?:todas?|todos?|ningun[ao]s?|amb[ao]s)\s+(?:(?:las?|los?)\s+)?(?:opciones?\s+)?(?:anteriores?|siguientes?)\b'
+    r'|\b[A-D]\s*(?:[,/]|[yoe]\b)\s*(?:(?:la\s+)?(?:opci[oó]n|alternativa)\s+)?[A-D]\b'
+    r'|\b(?:opci[oó]n|alternativa|respuesta|inciso)\s+(?:[A-D]\b|anterior\b|siguiente\b|primera\b|[uú]ltima\b)'
+    r'|\b(?:las?|los?)\s+(?:primer[ao]s?|[uú]ltim[ao]s?)\s+(?:dos\s+)?(?:opciones?|alternativas?|respuestas?)\b',
+    re.IGNORECASE
+)
+
+def position_dependent(question):
+    return any(POSITION_REFERENCE.search(text) for text in [question['stem'], *question['options'].values()])
+
+def assign_option_order(items):
+    randomizer = secrets.SystemRandom()
+    orders = {}
+    for question in items:
+        ids = list(question['options'])
+        if not position_dependent(question):
+            randomizer.shuffle(ids)
+        orders[question['id']] = ids
+    return orders
+
+def teacher_question(row):
+    question = decode(row['data'])
+    if position_dependent(question):
+        question['flags'] = list(dict.fromkeys([*question.get('flags', []), POSITION_NOTICE]))
+    return dict(question, approved=bool(row['approved']))
+
 def questions(db):
-    return [dict(decode(x['data']),approved=bool(x['approved'])) for x in db.execute('SELECT * FROM question')]
+    return [teacher_question(row) for row in db.execute('SELECT * FROM question')]
 def evaluation(db,c):
     row=db.execute('SELECT data FROM evaluation WHERE code=?',(c,)).fetchone()
     if not row: raise ValueError('Código de evaluación inválido.')
@@ -218,7 +247,10 @@ class Handler:
         now=int(time.time())
         a=db.execute('SELECT * FROM attempt WHERE code=? AND student=?',args).fetchone()
         if path=='/api/start' and self.command=='POST':
-            db.execute('INSERT INTO attempt(code,student,started) VALUES (?,?,?) ON CONFLICT DO NOTHING',(*args,now))
+            created = db.execute('INSERT INTO attempt(code,student,started) VALUES (?,?,?) ON CONFLICT DO NOTHING',(*args,now)).rowcount
+            if created:
+                ordering = assign_option_order(e['items'])
+                db.execute('INSERT INTO attempt_option_order VALUES (?,?,?)',(*args,encode(ordering)))
             a=db.execute('SELECT * FROM attempt WHERE code=? AND student=?',args).fetchone()
         items={q['id']:q for q in e['items']}
         expired=a and e['duration'] and now>=a['started']+60*e['duration']
@@ -240,7 +272,12 @@ class Handler:
         name=db.execute('SELECT name FROM roster WHERE id=?',(student,)).fetchone()['name']
         out=dict(name=name,section=e['section'],title=e['title'],duration=e['duration'],count=len(items),attempt=dict(a) if a else None)
         if a and not a['delivered']:
-            out['items']=[{k:q[k] for k in PUBLIC if k in q} for q in e['items']]
+            saved_order = db.execute('SELECT ordering FROM attempt_option_order WHERE code=? AND student=?',args).fetchone()
+            ordering = decode(saved_order['ordering']) if saved_order else {}
+            out['items'] = [
+                dict({k:q[k] for k in PUBLIC if k in q}, option_order=ordering.get(q['id'],list(q['options'])))
+                for q in e['items']
+            ]
         if a and a['delivered'] and e.get('results'):
             report=summary(e,[dict(id=student,name=name)],{student:a})[0]
             out.update(results=report['values'],score=report['score'],grade=report['grade'])

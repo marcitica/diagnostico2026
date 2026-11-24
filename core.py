@@ -16,6 +16,7 @@ initialized=False
 DATA=json.loads((ROOT/'banco.json').read_text('utf8'))
 PUBLIC=('id','stem','options','visual')
 EXAM_SIZE=60
+EXAM_DURATION=180
 INITIAL_IDS=[f'2-{n}' for n in range(1,EXAM_SIZE+1)]
 FIELDS=('stem','options','level','area','result','indicator','topic','tags','key','why','origin','keytype','keysource','visual')
 def encode(x): return json.dumps(x,ensure_ascii=False)
@@ -75,6 +76,7 @@ def setup():
                 'CREATE TABLE IF NOT EXISTS evaluation (code TEXT PRIMARY KEY, data TEXT NOT NULL, created BIGINT NOT NULL)',
                 "CREATE TABLE IF NOT EXISTS attempt (code TEXT, student TEXT, answers TEXT NOT NULL DEFAULT '{}', marks TEXT NOT NULL DEFAULT '[]', started BIGINT, delivered BIGINT, receipt TEXT, PRIMARY KEY(code,student))",
                 'CREATE TABLE IF NOT EXISTS session (token TEXT PRIMARY KEY, role TEXT, subject TEXT, evaluation TEXT, expires BIGINT)',
+                'CREATE TABLE IF NOT EXISTS attempt_deadline (code TEXT, student TEXT, deadline BIGINT NOT NULL, PRIMARY KEY(code,student))',
                 'CREATE TABLE IF NOT EXISTS attempt_option_order (code TEXT, student TEXT, ordering TEXT NOT NULL, PRIMARY KEY(code,student))',
                 'CREATE TABLE IF NOT EXISTS asset (id TEXT PRIMARY KEY, mime TEXT NOT NULL, content TEXT NOT NULL)',
             ]
@@ -249,15 +251,24 @@ class Handler:
         if path=='/api/start' and self.command=='POST':
             created = db.execute('INSERT INTO attempt(code,student,started) VALUES (?,?,?) ON CONFLICT DO NOTHING',(*args,now)).rowcount
             if created:
+                db.execute('INSERT INTO attempt_deadline VALUES (?,?,?)',(*args,now+60*EXAM_DURATION))
                 ordering = assign_option_order(e['items'])
                 db.execute('INSERT INTO attempt_option_order VALUES (?,?,?)',(*args,encode(ordering)))
             a=db.execute('SELECT * FROM attempt WHERE code=? AND student=?',args).fetchone()
         items={q['id']:q for q in e['items']}
-        expired=a and e['duration'] and now>=a['started']+60*e['duration']
+        deadline = None
+        if a:
+            saved_deadline = db.execute('SELECT deadline FROM attempt_deadline WHERE code=? AND student=?',args).fetchone()
+            if saved_deadline:
+                deadline = saved_deadline['deadline']
+            elif e['duration']:
+                deadline = a['started']+60*e['duration']
+        expired = deadline is not None and now>=deadline
         if a and not a['delivered'] and (expired or (self.command=='POST' and path=='/api/submit')):
             db.execute('UPDATE attempt SET delivered=?,receipt=? WHERE code=? AND student=? AND delivered IS NULL',(now,code(),*args))
             a=db.execute('SELECT * FROM attempt WHERE code=? AND student=?',args).fetchone()
         if path=='/api/answer' and self.command=='POST':
+            if expired: return {'saved':False,'expired':True}
             if not a or a['delivered']: raise ValueError('El intento ya está cerrado o aún no inició.')
             q=items[p['id']]
             answers,marks=decode(a['answers']),set(decode(a['marks']))
@@ -270,7 +281,7 @@ class Handler:
             return {'saved':True}
         if path not in ('/api/student','/api/start','/api/submit'): raise PermissionError('Acceso restringido.')
         name=db.execute('SELECT name FROM roster WHERE id=?',(student,)).fetchone()['name']
-        out=dict(name=name,section=e['section'],title=e['title'],duration=e['duration'],count=len(items),attempt=dict(a) if a else None)
+        out=dict(name=name,section=e['section'],title=e['title'],duration=EXAM_DURATION if not a else ((deadline-a['started'])//60 if deadline else 0),deadline=deadline,server_now=now,count=len(items),attempt=dict(a) if a else None)
         if a and not a['delivered']:
             saved_order = db.execute('SELECT ordering FROM attempt_option_order WHERE code=? AND student=?',args).fetchone()
             ordering = decode(saved_order['ordering']) if saved_order else {}
@@ -416,7 +427,7 @@ class Handler:
             if not roster: raise ValueError('La evaluación necesita estudiantes inscritos.')
             if not p['title'].strip() or not 0<=p['support']<=100: raise ValueError('Revisá el nombre y el porcentaje de referencia.')
             c=code()
-            e=dict(title=p['title'],section=p['section'],duration=0,minimum=1,support=p['support'],mastery=100,items=items,roster=roster,results=False)
+            e=dict(title=p['title'],section=p['section'],duration=EXAM_DURATION,minimum=1,support=p['support'],mastery=100,items=items,roster=roster,results=False)
             db.execute('INSERT INTO evaluation VALUES (?,?,?)',(c,encode(e),time.time_ns()))
             db.execute("INSERT INTO config VALUES ('draft',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",(encode({k:p[k] for k in ('ids','title','section','support')}),))
             return {'code':c}

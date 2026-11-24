@@ -252,7 +252,7 @@ class Handler:
 
     def teacher(self,db,path,p):
         if path=='/api/teacher':
-            return dict(sections=[x['id'] for x in db.execute('SELECT id FROM section')],roster=rows(db,"SELECT id,name,section,(pin <> '') AS has_pin FROM roster ORDER BY name"),bank=questions(db),sources=DATA['sources'],draft=self.draft(db),curriculum=rows(db,"SELECT substr(id,12) ref,value name FROM config WHERE substr(id,1,11)='curriculum:'"),exams=[dict(code=x['code'],title=decode(x['data'])['title']) for x in db.execute('SELECT code,data FROM evaluation ORDER BY created DESC')])
+            return dict(sections=[x['id'] for x in db.execute('SELECT id FROM section')],roster=rows(db,"SELECT id,name,section,(pin <> '') AS has_pin FROM roster ORDER BY name"),bank=questions(db),sources=DATA['sources'],draft=self.draft(db),curriculum=rows(db,"SELECT substr(id,12) ref,value name FROM config WHERE substr(id,1,11)='curriculum:'"),exams=[dict(code=x['code'],title=e['title'],roster=e['roster']) for x in db.execute('SELECT code,data FROM evaluation ORDER BY created DESC') for e in (decode(x['data']),)])
         if path=='/api/transcript':
             i,pag=int(p['file']),int(p['page'])
             if i not in (1,2,3,4) or not 1<=pag<=DATA['sources'][i]['pages']: raise ValueError('Página inválida.')
